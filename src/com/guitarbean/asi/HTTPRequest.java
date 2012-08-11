@@ -350,9 +350,9 @@ public class HTTPRequest implements Runnable {
 		if (!dir.exists()) {
 			dir.mkdir();
 		}
-		Log.i("headMeta:",""+ fullPathMetaName);
+		//Log.i("headMeta:",""+ fullPathMetaName);
 		HeaderMeta meta = makeHeaderMeta();
-		Log.i("meta",""+meta);
+		//Log.i("meta",""+meta);
 		try {
 			ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(fullPathMetaName));
 			oos.writeObject(meta);
@@ -383,7 +383,6 @@ public class HTTPRequest implements Runnable {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}finally{
-			meta=null;
 		}
 		return meta;
 	}
@@ -435,10 +434,18 @@ public class HTTPRequest implements Runnable {
 	}
 	//如果本地文件过期，则查看服务器文件是否未过期
 	private boolean isExpiredAndNeedUpdate(){
-		if (headerMetaFromCache==null) {
+		if ((headerMetaFromCache = getHeaderMeta())==null) {
 			writeHeaderMeta();
 			return true;
 		}
+		Log.i("isExpiredAndNeedUpdate",
+				""
+						+ new Date().getTime()
+						+ ","
+						+ headerMetaFromCache.getExpiration()
+						+ ","
+						+ (new Date().getTime() > headerMetaFromCache
+								.getExpiration()));
 		if (new Date().getTime()>headerMetaFromCache.getExpiration()) {
 			prepareHeaderFromConnection();
 			Map<String, List<String>> headers = HTTPRequest.this.headers;
@@ -463,10 +470,18 @@ public class HTTPRequest implements Runnable {
 	}
 	//直接检查服务器文件是否过期
 	private boolean needUpdate() {
-		if (headerMetaFromCache==null) {
+		if ((headerMetaFromCache = getHeaderMeta())==null) {
 			writeHeaderMeta();
 			return true;
 		}
+		Log.i("needUpdate",
+				""
+						+ new Date().getTime()
+						+ ","
+						+ headerMetaFromCache.getExpiration()
+						+ ","
+						+ (new Date().getTime() > headerMetaFromCache
+								.getExpiration()));
 		prepareHeaderFromConnection();
 		Map<String, List<String>> headers = HTTPRequest.this.headers;
 		//check from ETag first

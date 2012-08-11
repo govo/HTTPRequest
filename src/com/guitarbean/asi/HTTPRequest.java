@@ -67,9 +67,24 @@ public class HTTPRequest implements Runnable {
 	String fullPathMetaDir;
 	String fullPathMetaName;
 	HeaderMeta headerMetaFromCache;
+	boolean isDataFromCache = false;
 	boolean thisSessionHeaderMetaWrited=false;
+
+	public static int CONNECTION_STATE_NOT_CONNECTED = 0;
+	public static int CONNECTION_STATE_CONNECTED = 1;
+	public static int CONNECTION_STATE_SUCCESSED = 2;
+	public static int CONNECTION_STATE_FAILED = 3;
+	public static int CONNECTION_STATE_CANCELED = 4;
+	//链接状态告知，仅告知
+	int connectionState=CONNECTION_STATE_NOT_CONNECTED;
 	
 
+	public int getConnectionState() {
+		return connectionState;
+	}
+	public boolean isDataFromCache() {
+		return isDataFromCache;
+	}
 	public HTTPDownloadCache getCache() {
 		return cache;
 	}
@@ -125,6 +140,8 @@ public class HTTPRequest implements Runnable {
 	 */
 	@Override
 	public void run() {
+		connectionState = CONNECTION_STATE_NOT_CONNECTED;
+		isDataFromCache = false;
 		forceStop = false;
 		exception = null;
 		headers = null;
@@ -162,6 +179,7 @@ public class HTTPRequest implements Runnable {
 					disConnect();
 					return;
 				}
+				isDataFromCache = true;
 				sendSuccessedMessage();
 				return;
 			}
@@ -178,6 +196,7 @@ public class HTTPRequest implements Runnable {
 					disConnect();
 					return;
 				}
+				isDataFromCache = true;
 				sendSuccessedMessage();
 				return;
 			}
@@ -191,6 +210,7 @@ public class HTTPRequest implements Runnable {
 					disConnect();
 					return;
 				}
+				isDataFromCache = true;
 				sendSuccessedMessage();
 			}
 			return;
@@ -208,6 +228,7 @@ public class HTTPRequest implements Runnable {
 					disConnect();
 					return;
 				}
+				isDataFromCache = true;
 				sendSuccessedMessage();
 				return;
 			}
@@ -221,7 +242,10 @@ public class HTTPRequest implements Runnable {
 		if (!initConnection()) {
 			return;
 		}
-		
+		if (forceStop) {
+			disConnect();
+			return;
+		}
 			
 		byte[] buffer=new byte[1024];
 		int length = 0, loaded=0;
@@ -248,7 +272,7 @@ public class HTTPRequest implements Runnable {
 				return;
 			}
 			bundle.putByteArray(bytesKey, result = os.toByteArray());
-			
+			connectionState = CONNECTION_STATE_SUCCESSED;
 			sendSuccessedMessage();
 			
 			
@@ -257,6 +281,7 @@ public class HTTPRequest implements Runnable {
 			
 		} catch (Exception e) {
 			e.printStackTrace();
+			connectionState = CONNECTION_STATE_FAILED;
 			if (forceStop) {
 				disConnect();
 				return;
@@ -273,6 +298,7 @@ public class HTTPRequest implements Runnable {
 						disConnect();
 						return;
 					}
+					isDataFromCache = true;
 					sendSuccessedMessage();
 				}else{
 					Log.i("FallbackToCacheIfLoadFailsCachePolicy", ""+e);
@@ -284,7 +310,6 @@ public class HTTPRequest implements Runnable {
 			default:
 				break;
 			}
-			Log.i("runn connect", ""+e);
 			sendFailedMessage(e);
 		}finally{
 			writeToCache();
@@ -405,14 +430,17 @@ public class HTTPRequest implements Runnable {
 		if (connection==null) {
 			try {
 				connection =(HttpURLConnection) url.openConnection();
+				connectionState = CONNECTION_STATE_CONNECTED;
 				return true;
 			} catch (IOException e) {
 				Log.i("initConnection", ""+e.getLocalizedMessage());
+				connectionState = CONNECTION_STATE_FAILED;
 				sendFailedMessage(e);
 				e.printStackTrace();
 				return false;
 			}
 		}
+		connectionState = CONNECTION_STATE_CONNECTED;
 		return true;
 	}
 	//准备header
@@ -438,14 +466,14 @@ public class HTTPRequest implements Runnable {
 			writeHeaderMeta();
 			return true;
 		}
-		Log.i("isExpiredAndNeedUpdate",
+/*		Log.i("isExpiredAndNeedUpdate",
 				""
 						+ new Date().getTime()
 						+ ","
 						+ headerMetaFromCache.getExpiration()
 						+ ","
 						+ (new Date().getTime() > headerMetaFromCache
-								.getExpiration()));
+								.getExpiration()));*/
 		if (new Date().getTime()>headerMetaFromCache.getExpiration()) {
 			prepareHeaderFromConnection();
 			Map<String, List<String>> headers = HTTPRequest.this.headers;
@@ -455,6 +483,7 @@ public class HTTPRequest implements Runnable {
 			if (ETag!=null && mETag!=null) {
 				return ETag.compareTo(mETag)!=0;
 			}
+			initConnection();
 			HttpURLConnection connection = HTTPRequest.this.connection;
 			//check lastModified
 			long lastModified = connection.getLastModified();
@@ -474,14 +503,14 @@ public class HTTPRequest implements Runnable {
 			writeHeaderMeta();
 			return true;
 		}
-		Log.i("needUpdate",
+/*		Log.i("needUpdate",
 				""
 						+ new Date().getTime()
 						+ ","
 						+ headerMetaFromCache.getExpiration()
 						+ ","
 						+ (new Date().getTime() > headerMetaFromCache
-								.getExpiration()));
+								.getExpiration()));*/
 		prepareHeaderFromConnection();
 		Map<String, List<String>> headers = HTTPRequest.this.headers;
 		//check from ETag first
@@ -490,6 +519,7 @@ public class HTTPRequest implements Runnable {
 		if (ETag!=null && mETag!=null) {
 			return ETag.compareTo(mETag)!=0;
 		}
+		initConnection();
 		HttpURLConnection connection = HTTPRequest.this.connection;
 		//check lastModified
 		long lastModified = connection.getLastModified();
@@ -516,6 +546,7 @@ public class HTTPRequest implements Runnable {
 		}
 	}
 	private void disConnect() {
+		connectionState = CONNECTION_STATE_CANCELED;
 		if (connection!=null) {
 			connection.disconnect();
 			connection=null;

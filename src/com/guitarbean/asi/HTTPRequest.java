@@ -70,13 +70,14 @@ public class HTTPRequest implements Runnable {
 	boolean isDataFromCache = false;
 	boolean thisSessionHeaderMetaWrited=false;
 
-	public static int CONNECTION_STATE_NOT_CONNECTED = 0;
-	public static int CONNECTION_STATE_CONNECTED = 1;
+	public static int CONNECTION_STATE_NOT_START = 0;
+	public static int CONNECTION_STATE_INITED = 1;
 	public static int CONNECTION_STATE_SUCCESSED = 2;
 	public static int CONNECTION_STATE_FAILED = 3;
 	public static int CONNECTION_STATE_CANCELED = 4;
+	public static int CONNECTION_STATE_CONNECTED = 5;
 	//链接状态告知，仅告知
-	int connectionState=CONNECTION_STATE_NOT_CONNECTED;
+	int connectionState=CONNECTION_STATE_NOT_START;
 	
 
 	public int getConnectionState() {
@@ -140,7 +141,7 @@ public class HTTPRequest implements Runnable {
 	 */
 	@Override
 	public void run() {
-		connectionState = CONNECTION_STATE_NOT_CONNECTED;
+		connectionState = CONNECTION_STATE_NOT_START;
 		isDataFromCache = false;
 		forceStop = false;
 		exception = null;
@@ -238,21 +239,28 @@ public class HTTPRequest implements Runnable {
 			disConnect();
 			return;
 		}
-		//建立链接
+/*		//建立链接
 		if (!initConnection()) {
+			Log.i("returned", ""+connection);
 			return;
-		}
-		if (forceStop) {
-			disConnect();
-			return;
-		}
+		}*/
 			
 		byte[] buffer=new byte[1024];
 		int length = 0, loaded=0;
-		total = connection.getContentLength();
-		prepareHeaderFromConnection();
 
 		try {
+			//建立链接
+			if (null!=(exception=initConnection())) {
+				throw exception;
+			}
+
+			if (forceStop) {
+				disConnect();
+				return;
+			}
+			total = connection.getContentLength();
+			prepareHeaderFromConnection();
+			
 			InputStream in = connection.getInputStream();
 			ByteArrayOutputStream os = new ByteArrayOutputStream(total);
 			while ((length = in.read(buffer))!=-1 && !forceStop) {
@@ -274,7 +282,6 @@ public class HTTPRequest implements Runnable {
 			bundle.putByteArray(bytesKey, result = os.toByteArray());
 			connectionState = CONNECTION_STATE_SUCCESSED;
 			sendSuccessedMessage();
-			
 			
 			os.close();
 			in.close();
@@ -300,16 +307,14 @@ public class HTTPRequest implements Runnable {
 					}
 					isDataFromCache = true;
 					sendSuccessedMessage();
+					return;
 				}else{
 					Log.i("FallbackToCacheIfLoadFailsCachePolicy", ""+e);
-					sendFailedMessage(e);
-					return;
+					//sendFailedMessage(e);
+					//return;
 				}
-				break;
-
-			default:
-				break;
 			}
+			Log.i("runn Failed",""+ connection);
 			sendFailedMessage(e);
 		}finally{
 			writeToCache();
@@ -362,22 +367,21 @@ public class HTTPRequest implements Runnable {
 		}
 	}
 	void writeHeaderMeta(){
-		if (thisSessionHeaderMetaWrited
-				|| fullPathMetaName == null
+		if (thisSessionHeaderMetaWrited || fullPathMetaName == null
 				|| policy == HTTPDownloadCache.DoNotReadFromCacheCachePolicy
 				|| policy == HTTPDownloadCache.DoNotWriteToCacheCachePolicy
 				|| policy == HTTPDownloadCache.OnlyLoadIfNotCachedCachePolicy
 				|| policy == HTTPDownloadCache.DontLoadCachePolicy
-				|| !initConnection()) {
+				|| initConnection() != null
+				|| prepareHeaderFromConnection() == null) {
 			return;
 		}
 		File dir = new File(fullPathMetaDir);
 		if (!dir.exists()) {
 			dir.mkdir();
 		}
-		//Log.i("headMeta:",""+ fullPathMetaName);
+		Log.i("writeHeader:",""+ fullPathMetaName+","+headers);
 		HeaderMeta meta = makeHeaderMeta();
-		//Log.i("meta",""+meta);
 		try {
 			ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(fullPathMetaName));
 			oos.writeObject(meta);
@@ -399,6 +403,7 @@ public class HTTPRequest implements Runnable {
 			ObjectInputStream in = new ObjectInputStream(new FileInputStream(fullPathMetaName));
 			meta = (HeaderMeta) in.readObject();
 			in.close();
+			Log.i("getHeaderMeta", fullPathMetaName+","+meta);
 		} catch (StreamCorruptedException e) {
 			e.printStackTrace();
 		} catch (FileNotFoundException e) {
@@ -426,32 +431,33 @@ public class HTTPRequest implements Runnable {
 		handler.sendMessage(message);
 	}
 	
-	private boolean initConnection() {
+	private Exception initConnection() {
 		if (connection==null) {
 			try {
 				connection =(HttpURLConnection) url.openConnection();
-				connectionState = CONNECTION_STATE_CONNECTED;
-				return true;
+				connectionState = CONNECTION_STATE_INITED;
+				return null;
 			} catch (IOException e) {
 				Log.i("initConnection", ""+e.getLocalizedMessage());
 				connectionState = CONNECTION_STATE_FAILED;
 				sendFailedMessage(e);
 				e.printStackTrace();
-				return false;
+				return e;
 			}
 		}
-		connectionState = CONNECTION_STATE_CONNECTED;
-		return true;
+		connectionState = CONNECTION_STATE_INITED;
+		return null;
 	}
 	//准备header
-	private void prepareHeaderFromConnection() {
-		if (headers==null) {
+	private Map<String, List<String>> prepareHeaderFromConnection() {
+		if (headers==null && initConnection()==null) {
 			Message message = handler.obtainMessage();
 			headers = connection.getHeaderFields();
 			message = handler.obtainMessage();
 			message.what=DID_RECEIVE_HEADER;
 			handler.sendMessage(message);
 		}
+		return headers;
 	}
 	//本地文件是否过期
 	private boolean isExpired() {
@@ -466,14 +472,14 @@ public class HTTPRequest implements Runnable {
 			writeHeaderMeta();
 			return true;
 		}
-/*		Log.i("isExpiredAndNeedUpdate",
+		Log.i("isExpiredAndNeedUpdate",
 				""
 						+ new Date().getTime()
 						+ ","
 						+ headerMetaFromCache.getExpiration()
 						+ ","
 						+ (new Date().getTime() > headerMetaFromCache
-								.getExpiration()));*/
+								.getExpiration()));
 		if (new Date().getTime()>headerMetaFromCache.getExpiration()) {
 			prepareHeaderFromConnection();
 			Map<String, List<String>> headers = HTTPRequest.this.headers;

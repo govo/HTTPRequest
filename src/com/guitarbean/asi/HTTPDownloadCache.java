@@ -4,7 +4,6 @@ import java.io.File;
 
 import android.content.Context;
 import android.os.Environment;
-import android.util.Log;
 
 public class HTTPDownloadCache {
 	String storagePath;

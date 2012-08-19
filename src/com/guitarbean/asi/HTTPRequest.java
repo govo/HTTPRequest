@@ -12,27 +12,19 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.io.OptionalDataException;
-import java.io.OutputStream;
 import java.io.Serializable;
 import java.io.StreamCorruptedException;
 import java.io.UnsupportedEncodingException;
+import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Calendar;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 
-import org.apache.http.util.ByteArrayBuffer;
-
-import android.R.bool;
-import android.R.integer;
-import android.annotation.SuppressLint;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
@@ -45,6 +37,7 @@ import android.util.Log;
  *
  */
 public class HTTPRequest implements Runnable {
+	int tag=0;
 
 	URL url;
 	BlockingQueue<HTTPRequest> queue;
@@ -92,6 +85,12 @@ public class HTTPRequest implements Runnable {
 
 	public void setCache(HTTPDownloadCache cache) {
 		this.cache = cache;
+	}
+	public int getTag() {
+		return tag;
+	}
+	public void setTag(int tag) {
+		this.tag = tag;
 	}
 
 
@@ -309,9 +308,7 @@ public class HTTPRequest implements Runnable {
 					sendSuccessedMessage();
 					return;
 				}else{
-					Log.i("FallbackToCacheIfLoadFailsCachePolicy", ""+e);
-					//sendFailedMessage(e);
-					//return;
+					Log.i("FallbackToCacheIfLoadFailsCachePolicy", "Failed:"+e);
 				}
 			}
 			Log.i("runn Failed",""+ connection);
@@ -325,7 +322,7 @@ public class HTTPRequest implements Runnable {
 		if (policy!=HTTPDownloadCache.DoNotWriteToCacheCachePolicy && fullPathName!=null && result!=null) {
 			File dir = new File(cache.storagePath);
 			if (!dir.exists()) {
-				dir.mkdir();
+				dir.mkdirs();
 			}
 			writeHeaderMeta();
 			File newFile = new File(fullPathName);
@@ -378,9 +375,9 @@ public class HTTPRequest implements Runnable {
 		}
 		File dir = new File(fullPathMetaDir);
 		if (!dir.exists()) {
-			dir.mkdir();
+			dir.mkdirs();
 		}
-		Log.i("writeHeader:",""+ fullPathMetaName+","+headers);
+		//Log.i("writeHeader:",""+ fullPathMetaName+","+fullPathMetaDir+","+dir.exists()+",\n"+headers);
 		HeaderMeta meta = makeHeaderMeta();
 		try {
 			ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(fullPathMetaName));
@@ -403,7 +400,7 @@ public class HTTPRequest implements Runnable {
 			ObjectInputStream in = new ObjectInputStream(new FileInputStream(fullPathMetaName));
 			meta = (HeaderMeta) in.readObject();
 			in.close();
-			Log.i("getHeaderMeta", fullPathMetaName+","+meta);
+			//Log.i("getHeaderMeta", fullPathMetaName+","+meta.getExpiration()+","+connection.getExpiration());
 		} catch (StreamCorruptedException e) {
 			e.printStackTrace();
 		} catch (FileNotFoundException e) {
@@ -459,28 +456,25 @@ public class HTTPRequest implements Runnable {
 		}
 		return headers;
 	}
-	//本地文件是否过期
+/*	//本地文件是否过期
 	private boolean isExpired() {
 		if (headerMetaFromCache==null) {
 			return true;
 		}
 		return new Date().getTime()>headerMetaFromCache.getExpiration();
-	}
+	}*/
 	//如果本地文件过期，则查看服务器文件是否未过期
 	private boolean isExpiredAndNeedUpdate(){
 		if ((headerMetaFromCache = getHeaderMeta())==null) {
 			writeHeaderMeta();
 			return true;
 		}
-		Log.i("isExpiredAndNeedUpdate",
-				""
-						+ new Date().getTime()
-						+ ","
-						+ headerMetaFromCache.getExpiration()
-						+ ","
-						+ (new Date().getTime() > headerMetaFromCache
-								.getExpiration()));
-		if (new Date().getTime()>headerMetaFromCache.getExpiration()) {
+		long now = new Date().getTime(),exp = headerMetaFromCache.getExpiration();
+		
+		Log.i("isExpiredAndNeedUpdate", "now:" + now + ",exp:" + exp
+				+ ",update:" + (now > exp));
+		
+		if (now>headerMetaFromCache.getExpiration()) {
 			prepareHeaderFromConnection();
 			Map<String, List<String>> headers = HTTPRequest.this.headers;
 			//check from ETag first
@@ -509,20 +503,14 @@ public class HTTPRequest implements Runnable {
 			writeHeaderMeta();
 			return true;
 		}
-/*		Log.i("needUpdate",
-				""
-						+ new Date().getTime()
-						+ ","
-						+ headerMetaFromCache.getExpiration()
-						+ ","
-						+ (new Date().getTime() > headerMetaFromCache
-								.getExpiration()));*/
+
 		prepareHeaderFromConnection();
 		Map<String, List<String>> headers = HTTPRequest.this.headers;
 		//check from ETag first
 		String ETag = getETagFromHeader(headers);
 		String mETag = headerMetaFromCache.getETag();
 		if (ETag!=null && mETag!=null) {
+			Log.i("needUpdate?", "Etag:"+ETag+",mETag:"+mETag);
 			return ETag.compareTo(mETag)!=0;
 		}
 		initConnection();
@@ -531,8 +519,10 @@ public class HTTPRequest implements Runnable {
 		long lastModified = connection.getLastModified();
 		long mLastModified = headerMetaFromCache.getLastModified();
 		if (lastModified!=0 && mLastModified!=0) {
+			Log.i("needUpdate?", "lastModified:"+lastModified+",mLastModified:"+mLastModified);
 			return lastModified>mLastModified;
 		}
+		Log.i("needUpdate?", "Etag:"+ETag+",mETag:"+mETag+",lastModified:"+lastModified+",mLastModified:"+mLastModified);
 		return true;
 	}
 	
@@ -547,8 +537,9 @@ public class HTTPRequest implements Runnable {
 		disConnect();
 		forceStop = true;
 		if (thread!=null) {
-			thread.stop();
-			thread.destroy();
+			//thread.stop();
+			//thread.destroy();
+			thread.interrupt();
 		}
 	}
 	private void disConnect() {
@@ -560,7 +551,7 @@ public class HTTPRequest implements Runnable {
 	}
 
 	public void startAsynchronous() {
-		handler = new InnerHandler();
+		handler = new InnerHandler(new WeakReference<HTTPRequest>(this));
 		thread = new Thread(this);
 		thread.start();
 	}
@@ -613,39 +604,42 @@ public class HTTPRequest implements Runnable {
 			return null;
 		}
 	}
-	private class InnerHandler extends Handler{
-
-		@Override
-		public void dispatchMessage(Message msg) {
-			// TODO Auto-generated method stub
-			super.dispatchMessage(msg);
+	static private class InnerHandler extends Handler{
+		WeakReference<HTTPRequest> requestReffReference;
+		
+		public InnerHandler(WeakReference<HTTPRequest> requestReffReference) {
+			super();
+			this.requestReffReference = requestReffReference;
 		}
 
 		@Override
 		public void handleMessage(Message msg) {
+			super.handleMessage(msg);
+			HTTPRequest request = requestReffReference.get();
+			HTTPRequestHandler delegate = request.delegate;
 			if (delegate==null) {
 				return;
 			}
-			super.handleMessage(msg);
+			
 			//Log.i("handleMessage",""+msg.what);
 			Bundle bundle = msg.getData();
 			switch (msg.what) {
 			case DID_START:
-				delegate.requestStarted(HTTPRequest.this);
+				delegate.requestStarted(request);
 				break;
 			case DID_FINISHED:
-				delegate.requestFinished(HTTPRequest.this);
+				delegate.requestFinished(request);
 				break;
 			case DID_RECEIVE_DATA:
 				if (bundle!=null) {
-					delegate.requestDidReseiveData(HTTPRequest.this, bundle.getByteArray(bytesKey));
+					delegate.requestDidReseiveData(request, bundle.getByteArray(bytesKey));
 				}
 				break;
 			case DID_RECEIVE_HEADER:
-				delegate.requestDidReceiveResponseHeaders(HTTPRequest.this, headers);
+				delegate.requestDidReceiveResponseHeaders(request, request.headers);
 				break;
 			case DID_FAILED:
-				delegate.requestFailed(HTTPRequest.this);
+				delegate.requestFailed(request);
 				break;
 			}
 		}
@@ -691,6 +685,7 @@ public class HTTPRequest implements Runnable {
 	static String getETagFromHeader(Map<String, List<String>> header){
 		List<String> list=null;
 		if (header!=null && (list = header.get("ETag"))!=null && list.size()>0) {
+			Log.i("getEtag", list.get(0));
 			return list.get(0);
 		}
 		return null;
@@ -706,6 +701,10 @@ public class HTTPRequest implements Runnable {
 		}
 	}
 	public static class HeaderMeta implements Serializable{
+		/**
+		 * 
+		 */
+		private static final long serialVersionUID = 2178061155671520201L;
 		long expiration;
 		long lastModified;
 		String contentType;

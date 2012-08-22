@@ -616,6 +616,9 @@ public class HTTPRequest implements Runnable {
 		public void handleMessage(Message msg) {
 			super.handleMessage(msg);
 			HTTPRequest request = requestReffReference.get();
+			if (request==null) {
+				return;
+			}
 			HTTPRequestHandler delegate = request.delegate;
 			if (delegate==null) {
 				return;

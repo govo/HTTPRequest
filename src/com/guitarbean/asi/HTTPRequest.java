@@ -3,6 +3,13 @@
  */
 package com.guitarbean.asi;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
+import android.util.Log;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -25,13 +32,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.os.Bundle;
-import android.os.Handler;
-import android.os.Message;
-import android.util.Log;
-
 /**
  * @author govo
  *
@@ -42,7 +42,12 @@ public class HTTPRequest implements Runnable {
 	URL url;
 	BlockingQueue<HTTPRequest> queue;
 	Thread thread;
-	Handler handler;
+
+    public Handler getHandler() {
+        return handler;
+    }
+
+    Handler handler;
 	HttpURLConnection connection;
 	HTTPRequestHandler delegate;
 	byte[] result;
@@ -152,11 +157,8 @@ public class HTTPRequest implements Runnable {
 		message = new Message();
 		Bundle bundle = new Bundle();
 		message.setData(bundle);
-		if (handler==null) {
-			handler = new Handler();
-		}
 		message.what = threadStatus = DID_START;
-		handler.sendMessage(message);
+		if(handler!=null)handler.sendMessage(message);
 
 		fileName = parseToMD5Code(url.toString());
 		fullPathName = null;
@@ -265,11 +267,14 @@ public class HTTPRequest implements Runnable {
 			while ((length = in.read(buffer))!=-1 && !forceStop) {
 				os.write(buffer,0,length);
 				loaded+=length;
-				message = handler.obtainMessage();
-				bundle.putByteArray(bytesKey, buffer);
-				message.setData(bundle);
-				message.what = threadStatus = DID_RECEIVE_DATA;
-				handler.sendMessage(message);
+                threadStatus = DID_RECEIVE_DATA;
+                if(handler!=null){
+                    message = handler.obtainMessage();
+                    bundle.putByteArray(bytesKey, buffer);
+                    message.setData(bundle);
+                    message.what = threadStatus;
+                    handler.sendMessage(message);
+                }
 				percent = (int) loaded*100/total;
 			}
 			if (forceStop) {
@@ -415,7 +420,9 @@ public class HTTPRequest implements Runnable {
 	}
 	//发送成功消息
 	private void sendSuccessedMessage() {
-		Message message = handler.obtainMessage();
+        connectionState = CONNECTION_STATE_SUCCESSED;
+        if(handler==null) return;
+        Message message = handler.obtainMessage();
 		Bundle bundle = message.getData();
 		bundle.putByteArray(bytesKey, result);
 		message.what = threadStatus =DID_FINISHED;
@@ -423,6 +430,8 @@ public class HTTPRequest implements Runnable {
 	}
 	private void sendFailedMessage(Exception exception) {
 		this.exception = exception;
+        connectionState = CONNECTION_STATE_FAILED;
+        if(handler==null) return;
 		Message message = handler.obtainMessage();
 		message.what = threadStatus = DID_FAILED;
 		handler.sendMessage(message);
@@ -448,11 +457,14 @@ public class HTTPRequest implements Runnable {
 	//准备header
 	private Map<String, List<String>> prepareHeaderFromConnection() {
 		if (headers==null && initConnection()==null) {
-			Message message = handler.obtainMessage();
-			headers = connection.getHeaderFields();
-			message = handler.obtainMessage();
-			message.what=DID_RECEIVE_HEADER;
-			handler.sendMessage(message);
+            headers = connection.getHeaderFields();
+            connectionState = CONNECTION_STATE_CONNECTED;
+            if(handler!=null){
+                Message message = handler.obtainMessage();
+                message = handler.obtainMessage();
+                message.what=DID_RECEIVE_HEADER;
+                handler.sendMessage(message);
+            }
 		}
 		return headers;
 	}
@@ -525,7 +537,25 @@ public class HTTPRequest implements Runnable {
 		Log.i("needUpdate?", "Etag:"+ETag+",mETag:"+mETag+",lastModified:"+lastModified+",mLastModified:"+mLastModified);
 		return true;
 	}
-	
+	public static String parseToMd5String(String s){
+
+        MessageDigest digest;
+        try {
+            digest = java.security.MessageDigest.getInstance("MD5");
+            digest.reset();
+            digest.update(s.getBytes());
+            byte messageDigest[] = digest.digest();
+            // Create Hex String
+            StringBuffer hexString = new StringBuffer();
+            int digLength=messageDigest.length;
+            for (int i=0; i<digLength; i++)
+                hexString.append(Integer.toHexString(0xFF & messageDigest[i]));
+            return hexString.toString();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
 	public void setDownloadCachePolicy(int policy) {
 		this.policy = policy;
 	}
@@ -666,23 +696,8 @@ public class HTTPRequest implements Runnable {
 		public void proxyAuthenticationNeededForRequest(HTTPRequest request);
 	}
 
-	static String parseToMD5Code(String s){
-		MessageDigest digest;
-		try {
-			digest = java.security.MessageDigest.getInstance("MD5");
-			digest.reset();
-			digest.update(s.getBytes());
-			byte messageDigest[] = digest.digest(); 
-			// Create Hex String    
-	        StringBuffer hexString = new StringBuffer();
-	        int digLength=messageDigest.length;
-	        for (int i=0; i<digLength; i++)    
-	            hexString.append(Integer.toHexString(0xFF & messageDigest[i]));
-	        return hexString.toString();
-		} catch (NoSuchAlgorithmException e) {
-			e.printStackTrace();
-			return null;
-		}
+	public String parseToMD5Code(String s){
+        return parseToMd5String(s);
 	}
 	
 	static String getETagFromHeader(Map<String, List<String>> header){

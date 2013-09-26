@@ -1,3 +1,3 @@
 HTTPRequest
 ===========
-Android Http library
+Android Http library like ASIHTTPRequest
